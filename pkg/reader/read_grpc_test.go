@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"github.com/ShyunnY/cruise/pkg/storage/memory"
 	"github.com/gogo/protobuf/types"
 	"github.com/jaegertracing/jaeger/proto-gen/api_v3"
 	"log"
@@ -19,7 +20,7 @@ func TestGrpcReader(t *testing.T) {
 		panic(err)
 	}
 
-	start := time.Now().Add(-time.Hour)
+	start := time.Now().Add(-time.Hour * 2)
 	log.Println(start, "ts: ", start.UnixMilli())
 
 	now := time.Now()
@@ -43,6 +44,18 @@ func TestGrpcReader(t *testing.T) {
 		},
 	})
 
-	log.Println(traces)
+	sm := memory.NewStoreMemory()
+	for _, span := range traces.ResourceSpans {
+		if err := sm.PutSpan(span); err != nil {
+			panic(err)
+		}
+	}
+
+	for _, svc := range sm.ListServices() {
+		log.Println(svc)
+		for _, op := range sm.ListOperations(svc) {
+			log.Println(op)
+		}
+	}
 
 }

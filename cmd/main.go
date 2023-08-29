@@ -10,8 +10,9 @@ func main() {
 		EnablePrintRoutes: true,
 	})
 
-	// search trace api group
-	apiG := app.Group("/api")
+	// search trace read group
+	// compatibility jaeger Read interface
+	apiG := app.Group("/read")
 	apiG.Get("/search")
 	apiG.Get("/query/:traceID")
 	apiG.Get("/service/:service")
