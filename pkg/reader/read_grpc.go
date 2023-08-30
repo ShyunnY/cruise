@@ -9,18 +9,33 @@ import (
 	"io"
 )
 
+const (
+	defaultHost = "127.0.0.1"
+	defaultPort = 16685
+)
+
 type GrpcReader struct {
 	cli api_v3.QueryServiceClient
 }
 
 type GrpcReaderConfig struct {
-	Address string
-	Port    int
+	Host string
+	Port int
+	opts []grpc.DialOption
 }
 
+// NewGrpcReader TODO: Config set default val
 func NewGrpcReader(conf GrpcReaderConfig) (*GrpcReader, error) {
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", conf.Address, conf.Port), grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	conf.setDefault()
+
+	address := fmt.Sprintf("%s:%d", conf.Host, conf.Port)
+	conn, err := grpc.Dial(
+		address,
+		conf.opts...,
+	)
 	if err != nil {
+		// TODO: 指数回退?
 		// clog.CL.Error("grpc reader unable to connect the target server")
 		return nil, err
 	}
@@ -85,4 +100,20 @@ func (g *GrpcReader) QueryServices(ctx context.Context, in QueryServicesRequest)
 
 func (g *GrpcReader) QueryOperations(ctx context.Context, in QueryOperationsRequest) (*OperationsResponse, error) {
 	return nil, nil
+}
+
+func (g *GrpcReaderConfig) setDefault() {
+
+	if g.Host == "" {
+		g.Host = defaultHost
+	}
+
+	if g.Port == 0 {
+		g.Port = defaultPort
+	}
+
+	if len(g.opts) == 0 {
+		g.opts = append(g.opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
 }

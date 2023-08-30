@@ -49,11 +49,8 @@ func TestGrpcReader(t *testing.T) {
 	sm := memory.NewStoreMemory()
 
 	// 测试PutSpan
-	for _, span := range traces.ResourceSpans {
-		if err := sm.PutSpan(span); err != nil {
-			panic(err)
-		}
-	}
+	sm.PutSpan(traces.ResourceSpans)
+
 	for _, svc := range sm.ListServices() {
 		log.Println(svc)
 		for _, op := range sm.ListOperations(svc) {

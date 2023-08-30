@@ -2,20 +2,36 @@ package pipe
 
 import (
 	"context"
+	"fmt"
 	"github.com/ShyunnY/cruise/pkg/storage"
+	"github.com/ShyunnY/cruise/pkg/storage/memory"
 	v1 "github.com/jaegertracing/jaeger/proto-gen/otel/trace/v1"
 	"log"
+	"time"
+)
+
+const (
+	defaultBatchSize = 2 << 7
+	defaultInterval  = time.Minute * 5
 )
 
 type storageSink struct {
-	store     storage.Storage
-	batchSize int
+	store         storage.Storage
+	batchSize     int
+	flushInterval time.Duration
 }
 
-func NewStorageSink(store storage.Storage, batchSize int) SinkPipe {
+type StorageSinkConfig struct {
+	Store     storage.Storage
+	BatchSize int
+	Interval  time.Duration
+}
+
+func NewStorageSink(conf StorageSinkConfig) SinkPipe {
 	return &storageSink{
-		store:     store,
-		batchSize: batchSize,
+		store:         conf.Store,
+		batchSize:     conf.BatchSize,
+		flushInterval: conf.Interval,
 	}
 }
 
@@ -29,15 +45,28 @@ func (ss *storageSink) Sink(ctx context.Context, spanCh chan *v1.ResourceSpans) 
 		finish := false
 		send := false
 
-		// TODO: consider add interval flush
+		timer := time.After(time.Millisecond * ss.flushInterval)
+		last := time.Now()
+
 		select {
 		case span := <-spanCh:
 			batch = append(batch, span)
 			send = len(batch) == ss.batchSize
 
 			if send {
-				log.Println("Sink plush spans for store")
-				// 指标数据
+				// metrics
+				log.Println("span batch reach preset capacity,will send spans for store backend")
+			}
+		case <-timer:
+			timer = time.After(time.Millisecond * ss.flushInterval)
+
+			// once the refresh interval is up, it will all refresh to the storage backend
+			send = time.Since(last) > (time.Millisecond*ss.flushInterval) && len(batch) > 0
+			if send {
+				// metrics
+				fmt.Printf("batch: %+v\n", len(batch))
+				log.Println("satisfy refresh cycle, will send spans for store backend")
+
 			}
 
 		case <-ctx.Done():
@@ -47,9 +76,14 @@ func (ss *storageSink) Sink(ctx context.Context, spanCh chan *v1.ResourceSpans) 
 		}
 
 		if send {
+			log.Println("sink has plush spans for store")
 			if err := ss.store.PutSpan(batch); err != nil {
 				panic(err)
 			}
+
+			// reset batch slice
+			batch = make([]*v1.ResourceSpans, 0, ss.batchSize)
+			send = false
 		}
 
 		if finish {
@@ -59,4 +93,23 @@ func (ss *storageSink) Sink(ctx context.Context, spanCh chan *v1.ResourceSpans) 
 	}
 
 	return nil
+}
+
+func (sc *StorageSinkConfig) setDefault() {
+
+	if sc.BatchSize == 0 {
+		// set default size = 256
+		sc.BatchSize = defaultBatchSize
+	}
+
+	if sc.Interval == 0 {
+		// set default interval = 5min
+		sc.Interval = defaultInterval
+	}
+
+	if sc.Store == nil {
+		// set default memory store
+		sc.Store = memory.NewStoreMemory()
+	}
+
 }

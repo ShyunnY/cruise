@@ -8,14 +8,23 @@ import (
 	"github.com/gogo/protobuf/types"
 	"github.com/jaegertracing/jaeger/proto-gen/api_v3"
 	v1 "github.com/jaegertracing/jaeger/proto-gen/otel/trace/v1"
+	"log"
 	"sync/atomic"
 	"time"
+)
+
+const (
+	defaultInterval = time.Minute * 10
+	defaultPeriod   = time.Hour * 24
+	defaultBufSize  = 2 << 9
 )
 
 type placeholder struct{}
 
 type WorkPool struct {
-	delay time.Duration
+	// pool get traces for reader interval
+	delay  time.Duration
+	period time.Duration
 
 	pipe   pipe.Pipeline
 	reader reader.Reader
@@ -29,42 +38,50 @@ type WorkPool struct {
 
 type WorkConfig struct {
 	Interval time.Duration
-	Read     reader.Reader
-	Sink     pipe.SinkPipe
-	Stages   []pipe.StagePipe
-	BufSize  int
+	period   time.Duration
+
+	Read    reader.Reader
+	Sink    pipe.SinkPipe
+	Stages  []pipe.StagePipe
+	BufSize int
 }
 
 func NewWorkPool(conf WorkConfig) *WorkPool {
 
+	conf.setDefault()
+
 	w := &WorkPool{
 		delay:  conf.Interval,
+		period: conf.period,
 		reader: conf.Read,
-		chunks: make(chan []*v1.ResourceSpans, 10),
+		chunks: make(chan []*v1.ResourceSpans),
 		send:   make(chan *v1.ResourceSpans, conf.BufSize),
 	}
 
+	w.OnPass()
 	pip := w.newPipeline(conf.Sink, conf.Stages...)
 	w.pipe = pip
 
 	return w
 }
 
+// Work
+// TODO: 可以使用stopCh进行控制组件的关闭
 func (w *WorkPool) Work(ctx context.Context) {
 	go w.backgroupSend()
+
 	timer := make(<-chan time.Time)
+	last := time.Now()
 
+	startTs := convertProtoTimestamp(last.Add(-w.period))
+	endTs, _ := types.TimestampProto(last)
 	for {
-		// mock param
-		begin, _ := types.TimestampProto(time.Now().Add(-time.Hour))
-		end, _ := types.TimestampProto(time.Now())
-
 		// query reader trace data
 		res, err := w.reader.SearchTraces(context.TODO(), reader.SearchTracesRequest{
 			SearchParam: &api_v3.TraceQueryParameters{
 				ServiceName:  "orange",
-				StartTimeMin: begin,
-				StartTimeMax: end,
+				StartTimeMin: startTs,
+				StartTimeMax: endTs,
 			},
 		})
 		if err != nil {
@@ -77,7 +94,7 @@ func (w *WorkPool) Work(ctx context.Context) {
 			w.chunks <- res.ResourceSpans
 		}
 
-		timer = time.After(w.delay * time.Second)
+		timer = time.After(w.delay)
 		select {
 		case <-ctx.Done():
 			close(w.done)
@@ -86,6 +103,11 @@ func (w *WorkPool) Work(ctx context.Context) {
 		case <-timer:
 			// reset timer
 			timer = time.After(w.delay)
+
+			// reset query timestamp
+			last = time.Now()
+			startTs = convertProtoTimestamp(last.Add(-w.delay))
+			endTs = convertProtoTimestamp(last)
 		}
 	}
 }
@@ -95,8 +117,9 @@ func (w *WorkPool) backgroupSend() {
 		select {
 		case spans := <-w.chunks:
 			if spans == nil {
-				return
+				continue
 			}
+
 			for _, span := range spans {
 				if w.pass.Load() {
 					w.send <- span
@@ -141,9 +164,55 @@ func (w *WorkPool) newPipeline(sink pipe.SinkPipe, stages ...pipe.StagePipe) pip
 		// TODO: 发生错误,需要通知 pool暂时停止发送信息
 		err := pip.Run(context.Background())
 		if err != nil {
-
+			log.Println(err)
 		}
 	}()
 
 	return pip
+}
+
+func (c *WorkConfig) setDefault() {
+
+	if c.Stages == nil {
+		// TODO: set default stages
+	}
+
+	if c.Interval <= 0 {
+		// set default interval
+		// If interval is not set, I consider 10 min as a time interval to get
+		c.Interval = defaultInterval
+	}
+
+	if c.period <= 0 {
+		// set default 1 day period
+		c.period = defaultPeriod
+	}
+
+	if c.Read == nil {
+		// set default grpc reader
+		grpcReader, err := reader.NewGrpcReader(reader.GrpcReaderConfig{})
+		if err != nil {
+			// TODO: 尝试指数回退机制
+			log.Println(err)
+		}
+		c.Read = grpcReader
+	}
+
+	if c.Sink == nil {
+		// set default memorey store sink
+		c.Sink = pipe.NewStorageSink(pipe.StorageSinkConfig{})
+	}
+
+	if c.BufSize <= 0 {
+		// set default bufSize=1024
+		c.BufSize = defaultBufSize
+	}
+
+}
+
+func convertProtoTimestamp(t time.Time) *types.Timestamp {
+
+	// we can ignore convert error
+	ts, _ := types.TimestampProto(t)
+	return ts
 }

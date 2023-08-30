@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/ShyunnY/cruise/pkg/clog"
 	v1 "github.com/jaegertracing/jaeger/proto-gen/otel/trace/v1"
+	"log"
 	"sync"
 )
 
@@ -54,20 +55,25 @@ func (p *spanPipeline) AddStagePipes(stages ...StagePipe) {
 func (p *spanPipeline) Run(ctx context.Context) error {
 
 	errCh := make(chan error)
-	spanCh := make(chan *v1.ResourceSpans)
+
+	spanCh := make(chan *v1.ResourceSpans, 10)
+
+	// TODO: Subsequent may use many goroutines processing Backward compatibility
 	wg := sync.WaitGroup{}
 	wg.Add(p.workNum)
 
+	// get source data chan
 	in, err := p.source.Input(ctx)
 	if err != nil {
 		// clog.error
 		return err
 	}
 
-	err = p.sink.Sink(ctx, spanCh)
-	if err != nil {
-		return err
-	}
+	go func() {
+		if errSink := p.sink.Sink(ctx, spanCh); err != nil {
+			log.Println(errSink)
+		}
+	}()
 
 	handler := func(ch <-chan *v1.ResourceSpans) error {
 		defer func() {

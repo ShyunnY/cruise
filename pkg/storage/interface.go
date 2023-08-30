@@ -17,7 +17,7 @@ type Storage interface {
 
 	ListTrace(tp TraceParameters) []*v1.TracesData
 	ListServices() []string
-	ListOperations() []spanstore.Operation
+	ListOperations(svc string) []string
 
 	// PutSpan
 	// add or update trace

@@ -188,7 +188,7 @@ func (s *StoreMemory) matchSvcAndOp(tp storage.TraceParameters) []string {
 	// match operation
 	for _, op := range s.operations[tp.SvcName] {
 
-		if op.Name != tp.OperationName {
+		if tp.OperationName != "" && op.Name != tp.OperationName {
 			delete(spanIDMap, op.SpanID)
 		}
 
