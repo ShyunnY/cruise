@@ -26,8 +26,8 @@ func TestWork(t *testing.T) {
 	wp := pool.NewWorkPool(pool.WorkConfig{
 		Interval: 10,
 		Read:     r,
-		Sink: pipe.SinkPipeFunc(func(span *v1.ResourceSpans) error {
-			log.Println(span)
+		Sink: pipe.SinkPipeFunc(func(ctx context.Context, span chan *v1.ResourceSpans) error {
+
 			return nil
 		}),
 		Stages:  nil,

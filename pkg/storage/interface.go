@@ -11,7 +11,7 @@ import (
 // Storage
 // 存储接口
 // TODO: 这部分是由logic进行调用获取的
-// TODO: 考虑使用管道进行监听 避免重复进行调用导致 栈创建销毁的开销
+// TODO: 考虑使用批处理 避免重复进行调用导致 栈创建销毁的开销
 type Storage interface {
 	GetTrace(traceID string) *v1.TracesData
 
@@ -21,7 +21,7 @@ type Storage interface {
 
 	// PutSpan
 	// add or update trace
-	PutSpan(span *v1.ResourceSpans) error
+	PutSpan(span []*v1.ResourceSpans) error
 
 	// PutService add or update service
 	PutService(service string, spanID string) error

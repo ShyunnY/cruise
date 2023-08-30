@@ -50,16 +50,22 @@ func (p *spanPipeline) AddStagePipes(stages ...StagePipe) {
 
 // Run
 // TODO: 需要考虑一下 错误是应该立刻终止还是处理完剩下的再进行终止
-// 发生错误 应该告诉上述 别发了 关闭通道
+// TODO: 发生错误 应该告诉其他组件 别发了 关闭通道
 func (p *spanPipeline) Run(ctx context.Context) error {
 
 	errCh := make(chan error)
+	spanCh := make(chan *v1.ResourceSpans)
 	wg := sync.WaitGroup{}
 	wg.Add(p.workNum)
 
 	in, err := p.source.Input(ctx)
 	if err != nil {
 		// clog.error
+		return err
+	}
+
+	err = p.sink.Sink(ctx, spanCh)
+	if err != nil {
 		return err
 	}
 
@@ -88,14 +94,7 @@ func (p *spanPipeline) Run(ctx context.Context) error {
 					}
 				}
 
-				// 处理sink err
-				err := p.sink.Sink(span)
-				if err != nil {
-					clog.CL.Error("pipeline sink receive error")
-					close(errCh)
-					return err
-				}
-
+				spanCh <- span
 			}
 
 		}

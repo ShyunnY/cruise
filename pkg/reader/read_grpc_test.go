@@ -2,9 +2,12 @@ package reader
 
 import (
 	"context"
+	"fmt"
+	"github.com/ShyunnY/cruise/pkg/storage"
 	"github.com/ShyunnY/cruise/pkg/storage/memory"
 	"github.com/gogo/protobuf/types"
 	"github.com/jaegertracing/jaeger/proto-gen/api_v3"
+	cv1 "github.com/jaegertracing/jaeger/proto-gen/otel/common/v1"
 	"log"
 	"testing"
 	"time"
@@ -43,19 +46,49 @@ func TestGrpcReader(t *testing.T) {
 			StartTimeMax: ed,
 		},
 	})
-
 	sm := memory.NewStoreMemory()
+
+	// 测试PutSpan
 	for _, span := range traces.ResourceSpans {
 		if err := sm.PutSpan(span); err != nil {
 			panic(err)
 		}
 	}
-
 	for _, svc := range sm.ListServices() {
 		log.Println(svc)
 		for _, op := range sm.ListOperations(svc) {
 			log.Println(op)
 		}
 	}
+
+	// 1. 测试 matchServiceOrOperation √
+
+	// 2. 测试 matchOther
+	// 2.1 ElapsedMin √
+	// 2.2 ElapsedMax √
+	// 2.3 ElapsedMin-ElapsedMax √
+	// 2.4 StartTime √
+
+	// 3. 测试matchTags(⭐)
+	ts := sm.ListTrace(storage.TraceParameters{
+		SvcName:       "orange",
+		OperationName: "/usr",
+		//BeginTime:     time.Now().Add(-time.Minute * 30),
+		ElapsedMin: 0 * time.Millisecond,
+		ElapsedMax: 200 * time.Millisecond,
+		Resources: map[string]string{
+			"password": "123456",
+			"event":    "usr-event",
+		},
+	})
+
+	log.Println("return trace num: ", len(ts))
+
+}
+
+func TestTag(t *testing.T) {
+
+	val := cv1.AnyValue{Value: &cv1.AnyValue_StringValue{StringValue: "123456"}}
+	fmt.Printf("val: %+v\n", val.GetStringValue())
 
 }

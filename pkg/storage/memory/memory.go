@@ -4,6 +4,8 @@ import (
 	"errors"
 	"github.com/ShyunnY/cruise/pkg/storage"
 	"github.com/jaegertracing/jaeger/model"
+	cv1 "github.com/jaegertracing/jaeger/proto-gen/otel/common/v1"
+	rv1 "github.com/jaegertracing/jaeger/proto-gen/otel/resource/v1"
 	v1 "github.com/jaegertracing/jaeger/proto-gen/otel/trace/v1"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
 	"sort"
@@ -50,16 +52,23 @@ func (s *StoreMemory) ListTrace(tp storage.TraceParameters) []*v1.TracesData {
 		return nil
 	}
 
-	// match resource(tags) and duraion,time will second filter
+	// match resource(tags) and duraion,span time will second filter
 	for _, id := range ids {
 		if span, ok := s.spans[id]; ok {
-			if matchOther(span, tp) {
-				// get trace by span.traceID
 
+			if matchOther(span, tp) {
+
+				// get trace by span.traceID
 				traceID, _ := model.TraceIDFromBytes(span.TraceId)
+
 				if tc, ok := s.traces[traceID.String()]; ok {
-					retMe = append(retMe, tc)
+
+					// match tags
+					if matchTags(tc, tp) {
+						retMe = append(retMe, tc)
+					}
 				}
+
 			}
 		}
 	}
@@ -74,13 +83,6 @@ func (s *StoreMemory) ListTrace(tp storage.TraceParameters) []*v1.TracesData {
 	}
 
 	return retMe
-}
-
-func sortTraceByTime(retMe []*v1.TracesData, i int, j int) bool {
-	head := retMe[i].ResourceSpans[0].InstrumentationLibrarySpans[0].Spans[0].StartTimeUnixNano
-	tail := retMe[j].ResourceSpans[0].InstrumentationLibrarySpans[0].Spans[0].StartTimeUnixNano
-
-	return head < tail
 }
 
 func (s *StoreMemory) ListServices() []string {
@@ -113,48 +115,48 @@ func (s *StoreMemory) ListOperations(svc string) []string {
 
 // PutSpan
 // add span
-// todo: consider use channel passing data (i can define in sinkPipe(batch handler))
-// todo: aviod cost of stack creation and destruction
-func (s *StoreMemory) PutSpan(rspan *v1.ResourceSpans) error {
+// TODO: i choice batch handler
+func (s *StoreMemory) PutSpan(rspans []*v1.ResourceSpans) error {
 
-	if rspan == nil {
+	if rspans == nil {
 		return errors.New("span cannot be nil")
 	}
 
-	var svcName string
+	for _, rspan := range rspans {
+		var svcName string
 
-	// TODO:  对 resourceTag 进行索引
-	for _, attr := range rspan.Resource.Attributes {
-		if attr.GetKey() == serviceNameKey {
-			svcName = attr.GetValue().GetStringValue()
+		for _, attr := range rspan.Resource.Attributes {
+			if attr.GetKey() == serviceNameKey {
+				svcName = attr.GetValue().GetStringValue()
+			}
 		}
-	}
 
-	for _, librarySpan := range rspan.InstrumentationLibrarySpans {
-		for _, span := range librarySpan.Spans {
+		for _, librarySpan := range rspan.InstrumentationLibrarySpans {
+			for _, span := range librarySpan.Spans {
 
-			spanID, _ := model.SpanIDFromBytes(span.GetSpanId())
-			traceID, _ := model.TraceIDFromBytes(span.GetTraceId())
+				spanID, _ := model.SpanIDFromBytes(span.GetSpanId())
+				traceID, _ := model.TraceIDFromBytes(span.GetTraceId())
 
-			// set traces
-			if _, ok := s.traces[traceID.String()]; !ok {
-				s.traces[traceID.String()] = &v1.TracesData{}
+				// set traces
+				if _, ok := s.traces[traceID.String()]; !ok {
+					s.traces[traceID.String()] = &v1.TracesData{}
+				}
+				s.traces[traceID.String()].ResourceSpans = append(s.traces[traceID.String()].ResourceSpans, rspan)
+
+				// set service
+				s.services[svcName] = append(s.services[svcName], spanID.String())
+
+				// set operation
+				operation := storage.Operation{
+					Name:     span.GetName(),
+					SpanKind: span.Kind.String(),
+					SpanID:   spanID.String(),
+				}
+				s.operations[svcName] = append(s.operations[svcName], operation)
+
+				// set spans
+				s.spans[spanID.String()] = span
 			}
-			s.traces[traceID.String()].ResourceSpans = append(s.traces[traceID.String()].ResourceSpans, rspan)
-
-			// set service
-			s.services[svcName] = append(s.services[svcName], spanID.String())
-
-			// set operation
-			operation := storage.Operation{
-				Name:     span.GetName(),
-				SpanKind: span.Kind.String(),
-				SpanID:   spanID.String(),
-			}
-			s.operations[svcName] = append(s.operations[svcName], operation)
-
-			// set spans
-			s.spans[spanID.String()] = span
 		}
 	}
 
@@ -172,7 +174,7 @@ func (s *StoreMemory) PutOperation(service string, operation spanstore.Operation
 // match service and operation by traceParameter
 func (s *StoreMemory) matchSvcAndOp(tp storage.TraceParameters) []string {
 
-	var spanIDMap map[string]struct{}
+	spanIDMap := make(map[string]struct{})
 	var ret []string
 	// match svc
 	if ids, ok := s.services[tp.SvcName]; !ok {
@@ -184,11 +186,12 @@ func (s *StoreMemory) matchSvcAndOp(tp storage.TraceParameters) []string {
 	}
 
 	// match operation
-	// if exsit services, must exsit operations
 	for _, op := range s.operations[tp.SvcName] {
-		if _, ok := spanIDMap[op.SpanID]; ok {
+
+		if op.Name != tp.OperationName {
 			delete(spanIDMap, op.SpanID)
 		}
+
 	}
 
 	// at this point you can return
@@ -226,8 +229,82 @@ func matchOther(span *v1.Span, tp storage.TraceParameters) bool {
 		return false
 	}
 
-	// TODO: match resources(tags)
-	// TODO: pipeline stages define
-	// TODO: join test
+	// match resource tags
+
 	return true
+}
+
+func matchTags(tc *v1.TracesData, tp storage.TraceParameters) bool {
+
+	var res []*cv1.KeyValue
+
+	for _, rspans := range tc.ResourceSpans {
+
+		res = append(res, flattenResourceTags(rspans.Resource)...)
+
+		for _, ls := range rspans.InstrumentationLibrarySpans {
+			res = append(res, flattenlibrarySpanTags(ls)...)
+		}
+
+	}
+
+	// match tags kv
+	for queryK, queryV := range tp.Resources {
+
+		// In order to meet the matching in multiple tags
+		if !findKeyValMatch(res, queryK, queryV) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func findKeyValMatch(res []*cv1.KeyValue, queryK string, queryV string) bool {
+
+	for _, kv := range res {
+		if kv.Key == queryK && kv.Value.GetStringValue() == queryV {
+			return true
+		}
+	}
+
+	return false
+}
+
+func flattenResourceTags(resource *rv1.Resource) []*cv1.KeyValue {
+
+	var retMe []*cv1.KeyValue
+
+	retMe = append(retMe, resource.Attributes...)
+	return retMe
+}
+
+func flattenlibrarySpanTags(ls *v1.InstrumentationLibrarySpans) []*cv1.KeyValue {
+
+	var retMe []*cv1.KeyValue
+
+	// append InstrumentationLibrary tag
+	retMe = append(retMe, &cv1.KeyValue{
+		Key:   ls.InstrumentationLibrary.GetName(),
+		Value: &cv1.AnyValue{Value: &cv1.AnyValue_StringValue{StringValue: ls.InstrumentationLibrary.String()}},
+	})
+
+	// append span attributes
+	for _, span := range ls.Spans {
+		retMe = append(retMe, span.Attributes...)
+
+		// append span events
+		for _, event := range span.Events {
+			retMe = append(retMe, event.Attributes...)
+		}
+	}
+
+	return retMe
+}
+
+func sortTraceByTime(retMe []*v1.TracesData, i int, j int) bool {
+	head := retMe[i].ResourceSpans[0].InstrumentationLibrarySpans[0].Spans[0].StartTimeUnixNano
+	tail := retMe[j].ResourceSpans[0].InstrumentationLibrarySpans[0].Spans[0].StartTimeUnixNano
+
+	return head < tail
 }
