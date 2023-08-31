@@ -9,24 +9,25 @@ import (
 // TODO: 我们同时还需要一个可以外部进行拓展的Tag
 // TODO: 根据需求可以对指定的tag进行统计次数
 // TODO: 基础版本: error次数统计,duration平均耗时,预定义分位数,spanName统计...
+// TODO: ⭐: trace数据应该需要定期轮询外部
 type Metricx interface {
 	Desc()
 }
 
 type Cardinality interface {
 	Inc()
-	Count()
-	Rate(base uint64) float32
+	Count() uint64
+	Rate(base uint64) float64
 }
 
 // ErrorMetricx
 // use compute error count and rate
 type ErrorMetricx interface {
 	Cardinality
-	IncWithService(svc string)
-	RateWithService(svc string)
 
-	// TODO: consider add operation inc() and rate() if need
+	IncWithService(svc string)
+	RateWithService(svc string, base uint64) float64
+	CountWithService(svc string) uint64
 }
 
 // ElapsedMetricx
@@ -41,10 +42,11 @@ type ElapsedMetricx interface {
 
 type TagMetricx interface {
 	Cardinality
+
 	GetTag() *v1.KeyValue
 }
 
 type SpanMetricx interface {
-	Add(delta int)
+	Add(delta uint64)
 	Count() uint64
 }

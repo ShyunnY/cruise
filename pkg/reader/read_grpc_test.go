@@ -2,12 +2,10 @@ package reader
 
 import (
 	"context"
-	"fmt"
 	"github.com/ShyunnY/cruise/pkg/storage"
 	"github.com/ShyunnY/cruise/pkg/storage/memory"
 	"github.com/gogo/protobuf/types"
 	"github.com/jaegertracing/jaeger/proto-gen/api_v3"
-	cv1 "github.com/jaegertracing/jaeger/proto-gen/otel/common/v1"
 	"log"
 	"testing"
 	"time"
@@ -16,8 +14,8 @@ import (
 func TestGrpcReader(t *testing.T) {
 
 	reader, err := NewGrpcReader(GrpcReaderConfig{
-		Address: "192.168.136.134",
-		Port:    16685,
+		Host: "192.168.136.134",
+		Port: 16685,
 	})
 	if err != nil {
 		panic(err)
@@ -80,12 +78,5 @@ func TestGrpcReader(t *testing.T) {
 	})
 
 	log.Println("return trace num: ", len(ts))
-
-}
-
-func TestTag(t *testing.T) {
-
-	val := cv1.AnyValue{Value: &cv1.AnyValue_StringValue{StringValue: "123456"}}
-	fmt.Printf("val: %+v\n", val.GetStringValue())
 
 }

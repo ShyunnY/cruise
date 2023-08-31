@@ -22,7 +22,7 @@ type SourcePipe interface {
 // SinkPipe
 // as a sink source for pipeline
 type SinkPipe interface {
-	Sink(ctx context.Context, span chan *v1.ResourceSpans) error
+	Sink(ctx context.Context, spanCh chan *v1.ResourceSpans) error
 }
 
 // StagePipe
@@ -37,8 +37,8 @@ func (f SourcePipeFunc) Input(ctx context.Context) (<-chan *v1.ResourceSpans, er
 	return f(ctx)
 }
 
-type SinkPipeFunc func(ctx context.Context, span chan *v1.ResourceSpans) error
+type SinkPipeFunc func(ctx context.Context, spanCh chan *v1.ResourceSpans) error
 
-func (f SinkPipeFunc) Sink(ctx context.Context, span chan *v1.ResourceSpans) error {
-	return f(ctx, span)
+func (f SinkPipeFunc) Sink(ctx context.Context, spanCh chan *v1.ResourceSpans) error {
+	return f(ctx, spanCh)
 }

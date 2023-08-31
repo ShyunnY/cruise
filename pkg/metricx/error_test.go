@@ -1,7 +1,7 @@
 package metricx
 
 import (
-	"log"
+	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
@@ -13,8 +13,8 @@ func TestErrorMetricx(t *testing.T) {
 	es.Inc()
 	es.Inc()
 	es.Inc()
-	es.Add(10)
+	es.Inc()
 
-	log.Println(es.ErrRate(100))
+	assert.Equal(t, 0.05, es.Rate(100))
 
 }

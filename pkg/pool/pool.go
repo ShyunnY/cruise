@@ -2,7 +2,6 @@ package pool
 
 import (
 	"context"
-	"github.com/ShyunnY/cruise/pkg/clog"
 	"github.com/ShyunnY/cruise/pkg/pipeline"
 	"github.com/ShyunnY/cruise/pkg/reader"
 	"github.com/gogo/protobuf/types"
@@ -14,9 +13,10 @@ import (
 )
 
 const (
-	defaultInterval = time.Minute * 10
-	defaultPeriod   = time.Hour * 24
-	defaultBufSize  = 2 << 9
+	defaultInterval   = time.Minute * 10
+	defaultPeriod     = time.Hour * 24
+	defaultBufSize    = 2 << 9
+	defaultOffsetTime = time.Minute * 2
 )
 
 type placeholder struct{}
@@ -38,7 +38,7 @@ type WorkPool struct {
 
 type WorkConfig struct {
 	Interval time.Duration
-	period   time.Duration
+	Period   time.Duration
 
 	Read    reader.Reader
 	Sink    pipe.SinkPipe
@@ -52,7 +52,7 @@ func NewWorkPool(conf WorkConfig) *WorkPool {
 
 	w := &WorkPool{
 		delay:  conf.Interval,
-		period: conf.period,
+		period: conf.Period,
 		reader: conf.Read,
 		chunks: make(chan []*v1.ResourceSpans),
 		send:   make(chan *v1.ResourceSpans, conf.BufSize),
@@ -71,12 +71,16 @@ func (w *WorkPool) Work(ctx context.Context) {
 	go w.backgroupSend()
 
 	timer := make(<-chan time.Time)
+	first := true
 	last := time.Now()
 
 	startTs := convertProtoTimestamp(last.Add(-w.period))
 	endTs, _ := types.TimestampProto(last)
 	for {
 		// query reader trace data
+		// TODO: 后期查询的时候可以考虑多协程去循环查询不同的service
+		// TODO: ⭐: 我们可以再抽象出来一层 将pool转为woker 往上再封装一个pool进行调度这些worker
+		// TODO: 前期先做单service
 		res, err := w.reader.SearchTraces(context.TODO(), reader.SearchTracesRequest{
 			SearchParam: &api_v3.TraceQueryParameters{
 				ServiceName:  "orange",
@@ -86,7 +90,7 @@ func (w *WorkPool) Work(ctx context.Context) {
 		})
 		if err != nil {
 			// TODO: 考虑是否进行指数回退进行获取
-			clog.CL.Error(err.Error())
+			log.Println(err)
 		}
 
 		// send pipeline channel
@@ -94,7 +98,10 @@ func (w *WorkPool) Work(ctx context.Context) {
 			w.chunks <- res.ResourceSpans
 		}
 
-		timer = time.After(w.delay)
+		if first {
+			timer = time.After(w.delay)
+			first = false
+		}
 		select {
 		case <-ctx.Done():
 			close(w.done)
@@ -104,15 +111,20 @@ func (w *WorkPool) Work(ctx context.Context) {
 			// reset timer
 			timer = time.After(w.delay)
 
+			log.Println("开始重新查询reader.")
+
 			// reset query timestamp
 			last = time.Now()
-			startTs = convertProtoTimestamp(last.Add(-w.delay))
+			// avoiding network outages or other problem provides forward offset by default
+			offset := -(w.delay + defaultOffsetTime)
+			startTs = convertProtoTimestamp(last.Add(offset))
 			endTs = convertProtoTimestamp(last)
 		}
 	}
 }
 
 func (w *WorkPool) backgroupSend() {
+
 	for {
 		select {
 		case spans := <-w.chunks:
@@ -183,9 +195,10 @@ func (c *WorkConfig) setDefault() {
 		c.Interval = defaultInterval
 	}
 
-	if c.period <= 0 {
+	if c.Period <= 0 {
 		// set default 1 day period
-		c.period = defaultPeriod
+		c.Period = defaultPeriod
+		log.Println(c.Period)
 	}
 
 	if c.Read == nil {

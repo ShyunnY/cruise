@@ -2,7 +2,6 @@ package pipe
 
 import (
 	"context"
-	"fmt"
 	"github.com/ShyunnY/cruise/pkg/storage"
 	"github.com/ShyunnY/cruise/pkg/storage/memory"
 	v1 "github.com/jaegertracing/jaeger/proto-gen/otel/trace/v1"
@@ -45,7 +44,7 @@ func (ss *storageSink) Sink(ctx context.Context, spanCh chan *v1.ResourceSpans) 
 		finish := false
 		send := false
 
-		timer := time.After(time.Millisecond * ss.flushInterval)
+		timer := time.After(ss.flushInterval)
 		last := time.Now()
 
 		select {
@@ -55,28 +54,29 @@ func (ss *storageSink) Sink(ctx context.Context, spanCh chan *v1.ResourceSpans) 
 
 			if send {
 				// metrics
-				log.Println("span batch reach preset capacity,will send spans for store backend")
+				// log.Println("span batch reach preset capacity,will send spans for store backend")
+
+				log.Println("span满足数量,开始刷往存储后端memory...")
 			}
 		case <-timer:
-			timer = time.After(time.Millisecond * ss.flushInterval)
+			timer = time.After(ss.flushInterval)
 
 			// once the refresh interval is up, it will all refresh to the storage backend
-			send = time.Since(last) > (time.Millisecond*ss.flushInterval) && len(batch) > 0
+			send = time.Since(last) > (ss.flushInterval) && len(batch) > 0
 			if send {
 				// metrics
-				fmt.Printf("batch: %+v\n", len(batch))
-				log.Println("satisfy refresh cycle, will send spans for store backend")
+				// log.Println("satisfy refresh cycle, will send spans for store backend")
 
+				log.Println("interval满足时间周期,开始刷往存储后端memory...")
 			}
 
 		case <-ctx.Done():
-			log.Println("Sink exit")
 			finish = true
 			send = len(batch) > 0
 		}
 
 		if send {
-			log.Println("sink has plush spans for store")
+			// log.Println("sink has plush spans for store")
 			if err := ss.store.PutSpan(batch); err != nil {
 				panic(err)
 			}
