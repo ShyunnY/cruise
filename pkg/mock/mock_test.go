@@ -155,5 +155,5 @@ func TestAllWork(t *testing.T) {
 	}()
 
 	// 3.work pool running...
-	workPool.Work(context.TODO())
+	workPool.Work()
 }

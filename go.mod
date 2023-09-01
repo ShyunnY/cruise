@@ -10,7 +10,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	go.uber.org/zap v1.25.0
 	google.golang.org/grpc v1.57.0
-	gopkg.in/yaml.v2 v2.4.0
+	k8s.io/apimachinery v0.28.1
 )
 
 require (
@@ -18,6 +18,7 @@ require (
 	github.com/chenzhuoyu/base64x v0.0.0-20230717121745-296ad89f973d // indirect
 	github.com/chenzhuoyu/iasm v0.9.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/uuid v1.3.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
@@ -48,4 +49,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230530153820-e85fd2cbaebc // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	k8s.io/klog/v2 v2.100.1 // indirect
+	k8s.io/utils v0.0.0-20230406110748-d93618cff8a2 // indirect
 )

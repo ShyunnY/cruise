@@ -10,6 +10,7 @@ type Pipeline interface {
 	AddSourcePipe(source SourcePipe)
 	AddSinkPipe(sink SinkPipe)
 	AddStagePipes(stages ...StagePipe)
+	ShutdownNotify() <-chan struct{}
 }
 
 // SourcePipe

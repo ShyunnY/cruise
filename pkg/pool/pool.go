@@ -67,7 +67,8 @@ func NewWorkPool(conf WorkConfig) *WorkPool {
 
 // Work
 // TODO: 可以使用stopCh进行控制组件的关闭
-func (w *WorkPool) Work(ctx context.Context) {
+func (w *WorkPool) Work() {
+
 	go w.backgroupSend()
 
 	timer := make(<-chan time.Time)
@@ -77,6 +78,7 @@ func (w *WorkPool) Work(ctx context.Context) {
 	startTs := convertProtoTimestamp(last.Add(-w.period))
 	endTs, _ := types.TimestampProto(last)
 	for {
+
 		// query reader trace data
 		// TODO: 后期查询的时候可以考虑多协程去循环查询不同的service
 		// TODO: ⭐: 我们可以再抽象出来一层 将pool转为woker 往上再封装一个pool进行调度这些worker
@@ -88,13 +90,14 @@ func (w *WorkPool) Work(ctx context.Context) {
 				StartTimeMax: endTs,
 			},
 		})
+
 		if err != nil {
 			// TODO: 考虑是否进行指数回退进行获取
 			log.Println(err)
 		}
 
 		// send pipeline channel
-		if res != nil {
+		if res != nil && len(res.ResourceSpans) > 0 {
 			w.chunks <- res.ResourceSpans
 		}
 
@@ -102,16 +105,16 @@ func (w *WorkPool) Work(ctx context.Context) {
 			timer = time.After(w.delay)
 			first = false
 		}
+
 		select {
-		case <-ctx.Done():
-			close(w.done)
 		case <-w.done:
+
+			// notify pipeline component allow exit
+			w.send <- nil
 			return
 		case <-timer:
 			// reset timer
 			timer = time.After(w.delay)
-
-			log.Println("开始重新查询reader.")
 
 			// reset query timestamp
 			last = time.Now()
@@ -133,11 +136,13 @@ func (w *WorkPool) backgroupSend() {
 			}
 
 			for _, span := range spans {
-				if w.pass.Load() {
+				if w.pass.Load() && span != nil {
 					w.send <- span
 				}
 			}
 		case <-w.done:
+
+			close(w.chunks)
 			return
 		}
 	}
@@ -149,6 +154,13 @@ func (w *WorkPool) OnPass() {
 
 func (w *WorkPool) OffPass() {
 	w.pass.Store(false)
+}
+
+func (w *WorkPool) Shutdown() {
+	close(w.done)
+
+	// wait pipeline sync data
+	<-w.pipe.ShutdownNotify()
 }
 
 // create work pool internal pipeline

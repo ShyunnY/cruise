@@ -15,12 +15,14 @@ type spanPipeline struct {
 	stages  []StagePipe
 	workNum int
 
-	mux sync.Mutex
+	notify chan struct{}
+	mux    sync.Mutex
 }
 
 func NewSpanPipeline() Pipeline {
 	return &spanPipeline{
 		mux:     sync.Mutex{},
+		notify:  make(chan struct{}),
 		workNum: 1,
 	}
 }
@@ -55,7 +57,6 @@ func (p *spanPipeline) AddStagePipes(stages ...StagePipe) {
 func (p *spanPipeline) Run(ctx context.Context) error {
 
 	errCh := make(chan error)
-
 	spanCh := make(chan *v1.ResourceSpans, 10)
 
 	// TODO: Subsequent may use many goroutines processing Backward compatibility
@@ -87,19 +88,21 @@ func (p *spanPipeline) Run(ctx context.Context) error {
 			case err := <-errCh:
 				return err
 			case <-ctx.Done():
-				// 处理超时
+
 				return nil
 			default:
-				for _, stage := range p.stages {
-					span, processErr = stage.Process(span)
-					if processErr != nil {
-						clog.CL.Error("pipeline processor error")
-						// 发生错误 关闭通道
-						close(errCh)
-						return processErr
-					}
+				if span == nil {
+					log.Println("pipeline exit")
+
+					// notify external user
+					close(p.notify)
+					return nil
 				}
 
+				span, errStage := p.handleStages(span, processErr, errCh)
+				if errStage != nil {
+					return errStage
+				}
 				spanCh <- span
 			}
 
@@ -111,10 +114,28 @@ func (p *spanPipeline) Run(ctx context.Context) error {
 	for i := 0; i < p.workNum; i++ {
 		go func() {
 			if err := handler(in); err != nil {
-				errCh <- err
+				log.Println(err)
 			}
 		}()
 	}
 
 	return nil
+}
+
+func (p *spanPipeline) ShutdownNotify() <-chan struct{} {
+	return p.notify
+}
+
+func (p *spanPipeline) handleStages(span *v1.ResourceSpans, processErr error, errCh chan error) (*v1.ResourceSpans, error) {
+	for _, stage := range p.stages {
+		span, processErr = stage.Process(span)
+		if processErr != nil {
+			clog.CL.Error("pipeline processor error")
+
+			// 发生错误 关闭通道
+			close(errCh)
+			return nil, processErr
+		}
+	}
+	return span, nil
 }
